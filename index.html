@@ -4,12 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ProofPulse</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
-      rel="stylesheet"
-    />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -25,7 +19,7 @@
       <main>
         <section id="home-screen" class="screen active">
           <div class="section-header">
-            <h2>Active Pulses</h2>
+            <h2>Pulses</h2>
             <button id="new-pulse-button" class="primary-button">New Pulse</button>
           </div>
 
@@ -49,34 +43,59 @@
               />
             </label>
 
-            <div class="editor-row">
-              <label>
-                Mode
-                <select id="pulse-mode">
-                  <option value="play-now">Play now</option>
-                  <option value="daily">Daily</option>
-                </select>
-              </label>
+            <label>
+              Sender
+              <input id="pulse-sender" type="text" maxlength="30" placeholder="Aster" />
+            </label>
 
-              <label>
-                Status
-                <select id="pulse-status">
-                  <option value="active">Active</option>
-                  <option value="paused">Paused</option>
-                </select>
-              </label>
-            </div>
+            <label>
+              Primary line
+              <input
+                id="pulse-primary"
+                type="text"
+                maxlength="90"
+                placeholder="New offer came through."
+              />
+            </label>
 
-            <div class="sub-header">
-              <h3>Beats</h3>
-              <button id="add-beat-button" class="small-button" type="button">
-                Add beat
-              </button>
-            </div>
+            <label>
+              Secondary text
+              <input
+                id="pulse-secondary"
+                type="text"
+                maxlength="120"
+                placeholder="You already said yes."
+              />
+            </label>
 
-            <div id="beats-list" class="beats-list"></div>
+            <label>
+              Mode
+              <select id="pulse-mode">
+                <option value="play-now">Play now</option>
+                <option value="daily">Daily</option>
+              </select>
+            </label>
+
+            <label id="delay-field">
+              Delay (seconds)
+              <input id="pulse-delay" type="number" min="0" max="86400" value="30" />
+            </label>
+
+            <label id="window-field" hidden>
+              Window
+              <select id="pulse-window">
+                <option value="">Any time</option>
+                <option value="morning">Morning</option>
+                <option value="afternoon">Afternoon</option>
+                <option value="evening">Evening</option>
+                <option value="night">Night</option>
+              </select>
+            </label>
 
             <div class="form-actions">
+              <button type="button" id="preview-button" class="small-button">
+                Preview notification
+              </button>
               <button type="submit" class="primary-button">Save Pulse</button>
             </div>
           </form>
@@ -86,50 +105,6 @@
 
     <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
 
-    <template id="beat-template">
-      <div class="beat-card">
-        <div class="beat-header">
-          <span class="beat-number">Beat</span>
-          <button type="button" class="delete-beat mini-button">Remove</button>
-        </div>
-
-        <div class="beat-fields">
-          <label>
-            Sender
-            <input class="beat-sender" type="text" maxlength="30" placeholder="Aster" />
-          </label>
-
-          <label>
-            Primary line
-            <input class="beat-primary" type="text" maxlength="90" placeholder="Morning run is done" />
-          </label>
-
-          <label>
-            Secondary text
-            <input class="beat-secondary" type="text" maxlength="120" placeholder="Outside. 7:52" />
-          </label>
-
-          <div class="beat-grid">
-            <label>
-              Delay (minutes)
-              <input class="beat-delay" type="number" min="0" max="1440" value="5" />
-            </label>
-
-            <label>
-              Window
-              <select class="beat-window">
-                <option value="">Any time</option>
-                <option value="morning">Morning</option>
-                <option value="afternoon">Afternoon</option>
-                <option value="evening">Evening</option>
-                <option value="night">Night</option>
-              </select>
-            </label>
-          </div>
-        </div>
-      </div>
-    </template>
-
-    <script src="app.js"></script>
+    <script type="module" src="app.js"></script>
   </body>
 </html>
