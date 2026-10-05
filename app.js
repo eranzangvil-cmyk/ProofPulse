@@ -23,7 +23,8 @@ const defaultPulses = [
     delaySeconds: 30,
     window: "morning",
     active: false,
-    scheduledTime: null
+    scheduledTime: null,
+    activatedAt: null
   },
   {
     id: crypto.randomUUID(),
@@ -35,7 +36,8 @@ const defaultPulses = [
     delaySeconds: 30,
     window: "evening",
     active: false,
-    scheduledTime: null
+    scheduledTime: null,
+    activatedAt: null
   }
 ];
 
@@ -154,7 +156,6 @@ async function handlePulseAction(action, id) {
       showToast(`"${pulse.name}" paused.`);
     } else {
       await activatePulse(pulse);
-      showToast(`"${pulse.name}" is live.`);
     }
     return;
   }
@@ -169,6 +170,7 @@ async function handlePulseAction(action, id) {
     copy.id = crypto.randomUUID();
     copy.name = `${copy.name} copy`;
     copy.active = false;
+    copy.activatedAt = null;
     state.pulses.unshift(copy);
     saveState();
     renderHome();
@@ -243,7 +245,7 @@ async function savePulseFromForm() {
     if (pulse) {
       const wasActive = pulse.active;
       if (wasActive) await deactivatePulse(pulse);
-      Object.assign(pulse, data, { scheduledTime: null });
+      Object.assign(pulse, data, { scheduledTime: null, activatedAt: null });
       if (wasActive) await activatePulse(pulse);
     }
   } else {
@@ -251,7 +253,8 @@ async function savePulseFromForm() {
       id: crypto.randomUUID(),
       ...data,
       active: false,
-      scheduledTime: null
+      scheduledTime: null,
+      activatedAt: null
     });
   }
 
@@ -301,37 +304,56 @@ function nextDailyDate(timeStr) {
   return target;
 }
 
-async function activatePulse(pulse) {
-  pulse.active = true;
+// Fire time for a Play Now pulse, based on when it was activated.
+function playNowFireTime(pulse) {
+  if (!pulse.activatedAt) return null;
+  return new Date(pulse.activatedAt).getTime() + pulse.delaySeconds * 1000;
+}
 
-  if (isNative) {
-    await scheduleNative(pulse);
-  } else {
-    scheduleBrowser(pulse);
+async function activatePulse(pulse) {
+  try {
+    if (isNative) {
+      await scheduleNative(pulse);
+    } else {
+      scheduleBrowser(pulse);
+    }
+  } catch (error) {
+    // Scheduling failed: the interface must not claim otherwise.
+    console.error("Scheduling failed", error);
+    pulse.active = false;
+    saveState();
+    renderHome();
+    showToast("Couldn't schedule. Pulse stays paused.");
+    return;
   }
 
+  pulse.active = true;
+  pulse.activatedAt = new Date().toISOString();
   saveState();
   renderHome();
+  showToast(`"${pulse.name}" is live.`);
 }
 
 async function deactivatePulse(pulse) {
   pulse.active = false;
+  pulse.activatedAt = null;
 
-  if (isNative) {
-    try {
+  try {
+    if (isNative) {
       await LocalNotifications.cancel({ notifications: [{ id: notificationId(pulse.id) }] });
-    } catch (error) {
-      console.error("Failed to cancel native notification", error);
+    } else {
+      clearBrowserTimers(pulse.id);
     }
-  } else {
-    clearBrowserTimers(pulse.id);
+  } catch (error) {
+    console.error("Failed to cancel notification", error);
+    showToast("Couldn't cancel cleanly — check the notification shade.");
   }
 
   saveState();
   renderHome();
 }
 
-async function scheduleNative(pulse) {
+async function scheduleNative(pulse, atOverride) {
   const base = {
     id: notificationId(pulse.id),
     title: pulse.sender,
@@ -342,26 +364,36 @@ async function scheduleNative(pulse) {
     ? {
         ...base,
         schedule: {
-          at: new Date(Date.now() + pulse.delaySeconds * 1000),
+          at: atOverride || new Date(Date.now() + pulse.delaySeconds * 1000),
           allowWhileIdle: true
         }
       }
     : (() => {
         const [hour, minute] = dailyTargetTime(pulse).split(":").map(Number);
+        // `on` with only hour/minute already repeats daily. Do not combine
+        // with `every` — the plugin prioritizes interval over clock time.
         return {
           ...base,
-          schedule: { on: { hour, minute }, every: "day", allowWhileIdle: true }
+          schedule: { on: { hour, minute }, allowWhileIdle: true }
         };
       })();
 
   await LocalNotifications.schedule({ notifications: [notification] });
 }
 
-function scheduleBrowser(pulse) {
+function scheduleBrowser(pulse, remainingMs) {
   clearBrowserTimers(pulse.id);
 
   if (pulse.mode === "play-now") {
-    const id = setTimeout(() => showPulse(pulse), pulse.delaySeconds * 1000);
+    const wait = remainingMs ?? pulse.delaySeconds * 1000;
+    const id = setTimeout(() => {
+      showPulse(pulse);
+      // One-shot: a delivered Play Now pulse is done, not still "active".
+      pulse.active = false;
+      pulse.activatedAt = null;
+      saveState();
+      renderHome();
+    }, wait);
     browserTimers.set(pulse.id, [id]);
     return;
   }
@@ -471,12 +503,43 @@ function escapeHtml(text) {
 // ---------------------------------------------------------------------------
 
 renderHome();
-// Re-arm every active Pulse. On native this re-schedules the same IDs, which
-// is harmless; in the browser timers died with the page and need rebuilding.
-state.pulses.filter((p) => p.active).forEach((p) => {
-  if (isNative) {
-    scheduleNative(p).catch((e) => console.error("Failed to re-arm pulse", e));
-  } else {
-    scheduleBrowser(p);
+
+// Re-arm active Pulses after a page load / app launch.
+// Daily: safe to re-schedule (same ID, same clock time).
+// Play Now: only re-arm if its fire time is still in the future — otherwise
+// it already delivered and reopening the app must not fire it again.
+{
+  let stateChanged = false;
+
+  state.pulses.filter((p) => p.active).forEach((pulse) => {
+    if (pulse.mode === "play-now") {
+      const fireAt = playNowFireTime(pulse);
+      const remaining = fireAt ? fireAt - Date.now() : null;
+
+      if (!fireAt || remaining <= 0) {
+        pulse.active = false;
+        pulse.activatedAt = null;
+        stateChanged = true;
+        return;
+      }
+
+      if (isNative) {
+        scheduleNative(pulse, new Date(fireAt)).catch((e) => console.error("Failed to re-arm pulse", e));
+      } else {
+        scheduleBrowser(pulse, remaining);
+      }
+      return;
+    }
+
+    if (isNative) {
+      scheduleNative(pulse).catch((e) => console.error("Failed to re-arm pulse", e));
+    } else {
+      scheduleBrowser(pulse);
+    }
+  });
+
+  if (stateChanged) {
+    saveState();
+    renderHome();
   }
-});
+}
